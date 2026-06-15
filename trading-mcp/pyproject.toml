@@ -1,0 +1,21 @@
+[project]
+name = "trading-mcp"
+version = "0.1.0"
+description = "AI-powered trading assistant using Gemini Pro and LangGraph"
+authors = [{ name = "Gemini CLI" }]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "langgraph",
+    "langchain-google-genai",
+    "smartapi-python",
+    "sqlalchemy",
+    "psycopg2-binary",
+    "redis",
+    "pydantic-settings",
+    "python-dotenv"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
