@@ -1,4 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from src.agents.trading_agent import TradingAgent
@@ -11,11 +13,23 @@ load_dotenv()
 
 app = FastAPI(title="Trading MCP API")
 
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Initialize DB on startup
 @app.on_event("startup")
 def startup():
-    # init_db() # Uncomment when DB is ready
-    pass
+    try:
+        init_db()
+        print("Database initialized successfully.")
+    except Exception as e:
+        print(f"Database initialization failed: {e}")
 
 class TradeRequest(BaseModel):
     symbol: str
@@ -27,7 +41,7 @@ class TradeResponse(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Trading MCP API"}
+    return FileResponse("src/api/index.html")
 
 @app.post("/trade", response_model=TradeResponse)
 async def execute_trade(request: TradeRequest):
@@ -35,9 +49,14 @@ async def execute_trade(request: TradeRequest):
     agent = TradingAgent(google_api_key=os.getenv("GOOGLE_API_KEY"))
     try:
         # Running the agent asynchronously
-        # For simplicity in this demo, we just trigger it
-        await agent.run(request.message)
-        return {"status": "success", "message": f"Agent triggered for {request.symbol}"}
+        final_state = await agent.run(request.symbol, request.message)
+        
+        # Get the last message from the agent (the decision/result)
+        agent_response = "No response from agent."
+        if final_state and "messages" in final_state and len(final_state["messages"]) > 0:
+            agent_response = final_state["messages"][-1].content
+            
+        return {"status": "success", "message": agent_response}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
