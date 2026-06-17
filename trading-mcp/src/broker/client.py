@@ -58,3 +58,12 @@ class AngelOneClient:
     def get_order_book(self) -> List[Dict[str, Any]]:
         """Fetches the order book."""
         return self.smart_api.orderBook()
+
+    def get_market_data(self, mode: str, exchange_tokens: Dict[str, List[str]]) -> Dict[str, Any]:
+        """Fetches market data for given tokens.
+        
+        Args:
+            mode: 'LTP', 'OHLC', or 'FULL'
+            exchange_tokens: e.g., {"NSE": ["3045", "2885"]}
+        """
+        return self.smart_api.getMarketData(mode, exchange_tokens)
