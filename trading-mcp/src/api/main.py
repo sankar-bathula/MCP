@@ -46,7 +46,22 @@ async def root():
 @app.post("/trade", response_model=TradeResponse)
 async def execute_trade(request: TradeRequest):
     """Triggers the LangGraph trading agent."""
-    agent = TradingAgent(google_api_key=os.getenv("GOOGLE_API_KEY"))
+    # Initialize Broker Client
+    broker = AngelOneClient(
+        api_key=os.getenv("ANGEL_API_KEY"),
+        client_id=os.getenv("ANGEL_CLIENT_CODE"),
+        password=os.getenv("ANGEL_PASSWORD"),
+        totp_secret=os.getenv("ANGEL_TOTP_SECRET")
+    )
+    
+    try:
+        print("Logging into broker...")
+        broker.login()
+    except Exception as e:
+        print(f"Broker login failed: {e}. Agent will run in simulation mode.")
+        broker = None
+
+    agent = TradingAgent(google_api_key=os.getenv("GOOGLE_API_KEY"), broker_client=broker)
     try:
         # Running the agent asynchronously
         final_state = await agent.run(request.symbol, request.message)
@@ -72,10 +87,10 @@ def get_trades():
 def get_broker_profile():
     """Fetches profile from Angel One."""
     client = AngelOneClient(
-        api_key=os.getenv("ANGEL_ONE_API_KEY"),
-        client_id=os.getenv("ANGEL_ONE_CLIENT_ID"),
-        password=os.getenv("ANGEL_ONE_PASSWORD"),
-        totp_secret=os.getenv("ANGEL_ONE_TOTP_SECRET")
+        api_key=os.getenv("ANGEL_API_KEY"),
+        client_id=os.getenv("ANGEL_CLIENT_CODE"),
+        password=os.getenv("ANGEL_PASSWORD"),
+        totp_secret=os.getenv("ANGEL_TOTP_SECRET")
     )
     try:
         client.login()
