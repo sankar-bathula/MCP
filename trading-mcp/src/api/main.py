@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
+from langchain_core.messages import HumanMessage, AIMessage
 from src.agents.trading_agent import TradingAgent
 from src.broker.client import AngelOneClient
 from src.db.models import SessionLocal, Trade, ExecutionLog, init_db
@@ -61,15 +62,23 @@ async def execute_trade(request: TradeRequest):
         print(f"Broker login failed: {e}. Agent will run in simulation mode.")
         broker = None
 
-    agent = TradingAgent(google_api_key=os.getenv("GOOGLE_API_KEY"), broker_client=broker)
+    agent = TradingAgent(github_api_key=os.getenv("GITHUB_API_KEY"), broker_client=broker)
     try:
         # Running the agent asynchronously
         final_state = await agent.run(request.symbol, request.message)
         
-        # Get the last message from the agent (the decision/result)
-        agent_response = "No response from agent."
-        if final_state and "messages" in final_state and len(final_state["messages"]) > 0:
-            agent_response = final_state["messages"][-1].content
+        # Collect all AI messages from this run
+        # Since we use operator.add, the final_state contains the full history.
+        # We want the messages after the last HumanMessage (which we just sent).
+        agent_messages = []
+        if final_state and "messages" in final_state:
+            for msg in reversed(final_state["messages"]):
+                if isinstance(msg, HumanMessage):
+                    break
+                if isinstance(msg, AIMessage):
+                    agent_messages.insert(0, msg.content)
+        
+        agent_response = "\n\n".join(agent_messages) if agent_messages else "No response from agent."
             
         return {"status": "success", "message": agent_response}
     except Exception as e:
