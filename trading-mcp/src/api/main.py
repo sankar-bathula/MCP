@@ -8,6 +8,7 @@ from src.agents.trading_agent import TradingAgent
 from src.broker.client import AngelOneClient
 from src.db.models import SessionLocal, Trade, ExecutionLog, init_db
 import os
+import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -46,8 +47,7 @@ async def root():
 
 @app.post("/trade", response_model=TradeResponse)
 async def execute_trade(request: TradeRequest):
-    """Triggers the LangGraph trading agent."""
-    # Initialize Broker Client
+    """Triggers the LangGraph trading agent and logs the trade to DB."""
     broker = AngelOneClient(
         api_key=os.getenv("ANGEL_API_KEY"),
         client_id=os.getenv("ANGEL_CLIENT_CODE"),
@@ -56,7 +56,6 @@ async def execute_trade(request: TradeRequest):
     )
     
     try:
-        print("Logging into broker...")
         broker.login()
     except Exception as e:
         print(f"Broker login failed: {e}. Agent will run in simulation mode.")
@@ -64,12 +63,28 @@ async def execute_trade(request: TradeRequest):
 
     agent = TradingAgent(github_api_key=os.getenv("GITHUB_API_KEY"), broker_client=broker)
     try:
-        # Running the agent asynchronously
         final_state = await agent.run(request.symbol, request.message)
         
-        # Collect all AI messages from this run
-        # Since we use operator.add, the final_state contains the full history.
-        # We want the messages after the last HumanMessage (which we just sent).
+        # Save to DB if a trade was executed
+        if final_state and "order_details" in final_state and final_state["next_action"] == "execute":
+            details = final_state["order_details"]
+            db = SessionLocal()
+            try:
+                new_trade = Trade(
+                    symbol=details.get("symbol"),
+                    quantity=details.get("quantity"),
+                    price=float(details.get("buy_price", 0)),
+                    transaction_type=details.get("type"),
+                    order_id=f"ORD_{int(datetime.datetime.now().timestamp())}",
+                    status="COMPLETED"
+                )
+                db.add(new_trade)
+                db.commit()
+            except Exception as db_e:
+                print(f"DB Error: {db_e}")
+            finally:
+                db.close()
+
         agent_messages = []
         if final_state and "messages" in final_state:
             for msg in reversed(final_state["messages"]):
@@ -79,7 +94,6 @@ async def execute_trade(request: TradeRequest):
                     agent_messages.insert(0, msg.content)
         
         agent_response = "\n\n".join(agent_messages) if agent_messages else "No response from agent."
-            
         return {"status": "success", "message": agent_response}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -87,10 +101,28 @@ async def execute_trade(request: TradeRequest):
 @app.get("/trades")
 def get_trades():
     """Fetches all trades from the database."""
-    db = SessionLocal()
-    trades = db.query(Trade).all()
-    db.close()
-    return trades
+    try:
+        db = SessionLocal()
+        trades = db.query(Trade).all()
+        # Convert SQLAlchemy objects to dicts for JSON response
+        trade_list = [
+            {
+                "id": t.id,
+                "symbol": t.symbol,
+                "quantity": t.quantity,
+                "price": t.price,
+                "transaction_type": t.transaction_type,
+                "order_id": t.order_id,
+                "status": t.status,
+                "timestamp": t.timestamp.isoformat() if t.timestamp else None
+            }
+            for t in trades
+        ]
+        db.close()
+        return trade_list
+    except Exception as e:
+        print(f"Error fetching trades: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/broker/profile")
 def get_broker_profile():
