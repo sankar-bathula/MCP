@@ -7,6 +7,9 @@ from langchain_core.messages import HumanMessage, AIMessage
 from src.agents.trading_agent import TradingAgent
 from src.broker.client import AngelOneClient
 from src.db.models import SessionLocal, Trade, ExecutionLog, init_db
+from src.services.trading_service import TradingService
+from src.utils.email_notifier import send_trade_notification
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import os
 import datetime
 from dotenv import load_dotenv
@@ -14,6 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI(title="Trading MCP API")
+trading_service = TradingService()
 
 # Add CORS middleware
 app.add_middleware(
@@ -24,14 +28,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+async def perform_scheduled_scan(scan_symbols: List[str], service: TradingService):
+    """Task to be run by the scheduler for continuous scanning."""
+    print(f"[{datetime.datetime.now()}] Starting scheduled market scan...")
+    for symbol in scan_symbols:
+        print(f"Scanning {symbol}...")
+        try:
+            await service.execute_trade_flow(symbol, "AUTO_SCAN")
+        except Exception as e:
+            print(f"Error during scheduled scan for {symbol}: {e}")
+    print(f"[{datetime.datetime.now()}] Scheduled market scan completed.")
+
 # Initialize DB on startup
 @app.on_event("startup")
-def startup():
+async def startup():
+    # Initialize DB
     try:
         init_db()
         print("Database initialized successfully.")
     except Exception as e:
         print(f"Database initialization failed: {e}")
+
+    # Initialize Scheduler
+    scheduler = AsyncIOScheduler()
+    
+    scan_symbols_str = os.getenv("SCAN_SYMBOLS", "")
+    scan_symbols = [s.strip() for s in scan_symbols_str.split(",") if s.strip()]
+    scan_interval = int(os.getenv("SCAN_INTERVAL_MINUTES", "15"))
+
+    if scan_symbols:
+        print(f"Starting continuous scanner for: {scan_symbols} every {scan_interval} minutes.")
+        scheduler.add_job(perform_scheduled_scan, 'interval', minutes=scan_interval, args=[scan_symbols, trading_service])
+        scheduler.start()
+    else:
+        print("No symbols configured for continuous scanning. Background scheduler not started.")
 
 class TradeRequest(BaseModel):
     symbol: str
@@ -48,42 +78,11 @@ async def root():
 @app.post("/trade", response_model=TradeResponse)
 async def execute_trade(request: TradeRequest):
     """Triggers the LangGraph trading agent and logs the trade to DB."""
-    broker = AngelOneClient(
-        api_key=os.getenv("ANGEL_API_KEY"),
-        client_id=os.getenv("ANGEL_CLIENT_CODE"),
-        password=os.getenv("ANGEL_PASSWORD"),
-        totp_secret=os.getenv("ANGEL_TOTP_SECRET")
-    )
-    
     try:
-        broker.login()
-    except Exception as e:
-        print(f"Broker login failed: {e}. Agent will run in simulation mode.")
-        broker = None
-
-    agent = TradingAgent(github_api_key=os.getenv("GITHUB_API_KEY"), broker_client=broker)
-    try:
-        final_state = await agent.run(request.symbol, request.message)
+        final_state = await trading_service.execute_trade_flow(request.symbol, request.message)
         
-        # Save to DB if a trade was executed
-        if final_state and "order_details" in final_state and final_state["next_action"] == "execute":
-            details = final_state["order_details"]
-            db = SessionLocal()
-            try:
-                new_trade = Trade(
-                    symbol=details.get("symbol"),
-                    quantity=details.get("quantity"),
-                    price=float(details.get("buy_price", 0)),
-                    transaction_type=details.get("type"),
-                    order_id=f"ORD_{int(datetime.datetime.now().timestamp())}",
-                    status="COMPLETED"
-                )
-                db.add(new_trade)
-                db.commit()
-            except Exception as db_e:
-                print(f"DB Error: {db_e}")
-            finally:
-                db.close()
+        if not final_state:
+             raise HTTPException(status_code=500, detail="Agent execution failed.")
 
         agent_messages = []
         if final_state and "messages" in final_state:
