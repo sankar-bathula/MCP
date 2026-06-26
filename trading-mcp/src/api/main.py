@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
+from contextlib import asynccontextmanager
 from langchain_core.messages import HumanMessage, AIMessage
 from src.agents.trading_agent import TradingAgent
 from src.broker.client import AngelOneClient
@@ -15,18 +16,8 @@ import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
-
-app = FastAPI(title="Trading MCP API")
 trading_service = TradingService()
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+scheduler = None
 
 async def perform_scheduled_scan(scan_symbols: List[str], service: TradingService):
     """Task to be run by the scheduler for continuous scanning."""
@@ -39,10 +30,10 @@ async def perform_scheduled_scan(scan_symbols: List[str], service: TradingServic
             print(f"Error during scheduled scan for {symbol}: {e}")
     print(f"[{datetime.datetime.now()}] Scheduled market scan completed.")
 
-# Initialize DB on startup
-@app.on_event("startup")
-async def startup():
-    # Initialize DB
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events."""
+    # Startup
     try:
         init_db()
         print("Database initialized successfully.")
@@ -50,6 +41,7 @@ async def startup():
         print(f"Database initialization failed: {e}")
 
     # Initialize Scheduler
+    global scheduler
     scheduler = AsyncIOScheduler()
     
     scan_symbols_str = os.getenv("SCAN_SYMBOLS", "")
@@ -62,6 +54,24 @@ async def startup():
         scheduler.start()
     else:
         print("No symbols configured for continuous scanning. Background scheduler not started.")
+    
+    yield
+    
+    # Shutdown
+    if scheduler and scheduler.running:
+        scheduler.shutdown()
+        print("Scheduler shut down successfully.")
+
+app = FastAPI(title="Trading MCP API", lifespan=lifespan)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class TradeRequest(BaseModel):
     symbol: str
@@ -141,3 +151,4 @@ def get_broker_profile():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
