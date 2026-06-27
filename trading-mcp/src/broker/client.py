@@ -59,11 +59,34 @@ class AngelOneClient:
         """Fetches the order book."""
         return self.smart_api.orderBook()
 
+    def get_historical_data(self, exchange: str, symboltoken: str, interval: str, from_date: str, to_date: str) -> List[Dict[str, Any]]:
+        """Fetches historical candle data from Angel One."""
+        try:
+            params = {
+                "exchange": exchange,
+                "symboltoken": symboltoken,
+                "interval": interval,
+                "fromdate": from_date,
+                "todate": to_date
+            }
+            response = self.smart_api.getCandleData(params)
+            if response.get("status") and response.get("data"):
+                # The API returns a list of lists: [timestamp, open, high, low, close, volume]
+                # We convert it to a list of dicts for consistency with the rest of the app.
+                history = []
+                for candle in response["data"]:
+                    history.append({
+                        "timestamp": candle[0],
+                        "open": float(candle[1]),
+                        "high": float(candle[2]),
+                        "low": float(candle[3]),
+                        "close": float(candle[4]),
+                        "volume": float(candle[5])
+                    })
+                return history
+            return []
+        except Exception as e:
+            print(f"Error fetching historical data: {e}")
+            return []
+
     def get_market_data(self, mode: str, exchange_tokens: Dict[str, List[str]]) -> Dict[str, Any]:
-        """Fetches market data for given tokens.
-        
-        Args:
-            mode: 'LTP', 'OHLC', or 'FULL'
-            exchange_tokens: e.g., {"NSE": ["3045", "2885"]}
-        """
-        return self.smart_api.getMarketData(mode, exchange_tokens)
