@@ -11,41 +11,53 @@ The Trading MCP is an AI-driven trading system that combines Large Language Mode
 - **API Layer:** FastAPI
 - **Broker Integration:** Angel One SmartAPI
 - **Database:** PostgreSQL (for trade logging and history)
+- **Notifications:** Telegram Bot API
+- **News Data:** Yahoo Finance (yfinance)
 - **Language:** Python 3.12+
 
 ---
 
 ## 2. Key Implementations
 
-### A. Smart Money Concepts (SMC) Logic
-The system has been upgraded from a simple prompt-responder to a proactive trading agent using SMC.
+### A. High-Conviction Trading Pipeline
+The system has been upgraded from a simple pattern-detector to a strict validation pipeline. A trade is only executed and notified if it passes the following checks:
 
-#### Pattern Detection (`_detect_smc_patterns`)
-The agent analyzes historical candle data to identify high-probability setups:
-- **Market Structure Shift (MSS):** Occurs when the price breaks the recent swing highs (for bullish) or lows (for bearish), signaling a change in trend.
-- **Order Blocks (OB):** Identifies the last opposing candle before a strong impulsive move that caused the MSS. This area is treated as a high-probability entry zone.
-- **Fair Value Gaps (FVG):** (Conceptual) used to identify price imbalances.
+#### 1. Technical Analysis (SMC & S/R)
+The agent identifies high-probability setups:
+- **Market Structure Shift (MSS):** Detects trend changes by breaking recent swing highs/lows.
+- **Order Blocks (OB):** Identifies high-probability entry zones.
+- **Support & Resistance (S/R):** Maps recent swing points to ensure entries occur in "Value Zones."
 
-#### Risk-to-Reward (RR) Management
-Every automated trade is strictly bound to a minimum **1:2 Risk-to-Reward ratio**:
-- **Risk:** The distance between the entry price and the Stop Loss (placed at the edge of the Order Block).
-- **Reward:** The Target price is automatically calculated as `Entry + (Risk * 2)` for BUYs and `Entry - (Risk * 2)` for SELLs.
+#### 2. Real-Time News Sentiment
+A dedicated **News Agent** fetches live headlines via `yfinance` and uses an LLM to:
+- **Filter Impact**: Only "High Impact" market-moving news is considered.
+- **Consolidate Sentiment**: Determines a global sentiment (Bullish/Bearish/Neutral) for the symbol.
+- **Alignment Check**: Rejects technical signals that contradict the news sentiment (e.g., no BUYs during strong Bearish news).
 
-### B. Automated Execution Workflow
+#### 3. Strict Risk-to-Reward (RR) Management
+Every automated trade is strictly bound to a minimum **1:2.5 Risk-to-Reward ratio**:
+- **Risk**: The distance between the entry price and the Stop Loss (placed beyond S/R levels).
+- **Reward**: The Target is automatically calculated as `Entry + (Risk * 2.5)` for BUYs.
+- **Zone Validation**: Targets must be realistic relative to existing S/R levels.
+
+### B. Notification System
+The system uses a Telegram Bot to provide real-time alerts:
+- **Trade Alerts**: Notifies the user when a high-conviction trade is executed.
+- **News Alerts**: Notifies the user when a high-impact, market-moving news event is detected.
+
+### C. Automated Execution Workflow
 The system supports two distinct operating modes:
 
-1.  **Manual Mode:** Triggered by user prompts. The LLM interprets the request and decides whether to trade.
-2.  **Automated Mode (`AUTO_SCAN`):**
+1.  **Manual Mode**: Triggered by user prompts. The LLM interprets the request and decides whether to trade.
+2.  **Automated Mode (`AUTO_SCAN`)**:
     - Triggered by the keyword `AUTO_SCAN` or via the `run_automated_strategy` method.
-    - Bypasses the LLM for the decision phase and uses the deterministic SMC logic.
-    - Ensures execution is based on technical patterns rather than LLM "sentiment."
+    - Passes through the **High-Conviction Pipeline** (Technical $\rightarrow$ Sentiment $\rightarrow$ Zone $\rightarrow$ RR).
 
-### C. Database & Logging System
-A robust logging system has been implemented to track performance and maintain a trade audit trail.
+### D. Database & Logging System
+A robust logging system tracks performance and maintains a trade audit trail.
 
-- **Trade Table:** Stores `symbol`, `quantity`, `price`, `transaction_type`, `order_id`, `status`, and `timestamp`.
-- **Execution Logs:** Stores the raw input/output of each node in the LangGraph workflow for debugging.
-- **Schema Sync:** The system uses SQLAlchemy to ensure the PostgreSQL schema matches the application models.
+- **Trade Table**: Stores `symbol`, `quantity`, `price`, `transaction_type`, `order_id`, `status`, and `timestamp`.
+- **Execution Logs**: Stores the raw input/output of each node in the LangGraph workflow for debugging.
 
 ---
 
@@ -65,21 +77,13 @@ You can interact with the system via the API or the `client_test.py` script.
 test_agent("NIFTY", "The market is breaking out. Should I buy?")
 ```
 
-**2. Automated SMC Scan:**
+**2. Automated High-Conviction Scan:**
 ```python
 test_agent("NIFTY", "AUTO_SCAN")
 ```
 
 ### Switching Models
-To change the LLM model, modify the `TradingAgent` constructor in `src/agents/trading_agent.py`:
-```python
-self.llm = ChatOpenAI(
-    model="gpt-4o", # Change to "gpt-4o-mini" or other supported models
-    api_key=github_api_key,
-    base_url="https://models.inference.ai.azure.com",
-    temperature=0
-)
-```
+To change the LLM model, modify the `TradingAgent` constructor in `src/agents/trading_agent.py`.
 
 ### Checking Trade History
 Use the provided utility script to view today's trades:
