@@ -88,5 +88,30 @@ class AngelOneClient:
         except Exception as e:
             print(f"Error fetching historical data: {e}")
             return []
-
     def get_market_data(self, mode: str, exchange_tokens: Dict[str, List[str]]) -> Dict[str, Any]:
+        """
+        Fetch live market data.
+
+        mode:
+            LTP
+            OHLC
+            FULL
+
+        exchange_tokens example:
+        {
+            "NSE": ["3045"],
+            "NFO": ["99926000"]
+        }
+        """
+        try:
+            params = {
+                "mode": mode,
+                "exchangeTokens": exchange_tokens
+            }
+
+            response = self.smart_api.getMarketData(params)
+            return response
+
+        except Exception as e:
+            print(f"Error fetching market data: {e}")
+            return {}
